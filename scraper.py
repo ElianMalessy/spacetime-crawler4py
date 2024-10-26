@@ -25,12 +25,25 @@ def extract_next_links(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
     if resp.status != 200:
         return []
+
     
     links = []
     soup = BeautifulSoup(resp.raw_response.content, 'lxml')
+
+    # check if should be crawled with tags and text analysis
+    nofollow = soup.find("meta", {"name": "robots", "content": re.compile("nofollow")})
+    if nofollow:
+        return []
+
+    text = soup.get_text()
+    # words = text.split(',')
+    text = re.sub(r'\s+', ' ', text)  # Replace multiple spaces with a single space
+    # count tokens now
+
     for link in soup.find_all('a', href=True):
         if link.get('href') is not None and link.get('href') != url:
             defragmented = link.get('href').split('#')[0]
+
             # For relative links they have to be joined with the base url
             full_url = urljoin(resp.url, defragmented, allow_fragments=False)
             links.append(full_url)
@@ -42,7 +55,7 @@ site_counts = defaultdict(int)
 trap_params = { 
     "session", "sid", "token", "auth", "sort", "order", "dir", "filter", "utm_content", 
     "reply", "comment", "message", "print", "format", "output", "preview", "draft", "share", "invite",
-    "debug", "test", "action"
+    "debug", "test", "action", "do"
 }
 allowed_domains = { 
     "ics.uci.edu",
@@ -100,18 +113,15 @@ def is_valid_domain(parsed):
     return False
 
 def is_trap(parsed):
-    if parsed[:6] == "mailto":
-        return True
-
     site = parsed.netloc + parsed.path
     # Return false if we receive some parameters that know are bad
-    # "page", "start", "offset", "limit" are OK but we have to be careful
     query_string = parsed.query
     params = parse_qs(query_string)
     if any(param in trap_params for param in params.keys()):
         return True
 
-    # If the same URL has been crawled more than 10 times, its probably a trap 
+    # "page", "start", "offset", "limit", and "idx" are OK but we have to be careful to not get trapped in an infinite loop
+    # Therefore if the same URL, (parameters nonwithstanding) has been crawled more than 10 times, its probably a trap 
     site_counts[site] += 1
     if site_counts[site] > 10:
         return True
