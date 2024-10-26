@@ -4,6 +4,7 @@ from bs4 import BeautifulSoup
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
+
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
@@ -23,7 +24,8 @@ def extract_next_links(url, resp):
     soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
     for link in soup.find_all('a'):
         if link.get('href') is not None and link.get('href') != url:
-            links.append(link.get('href'))
+            defragmented = link.get('href').split('#')[0]
+            links.append(defragmented)
     return links
 
 def is_valid(url):
@@ -55,19 +57,19 @@ def is_valid(url):
             return False
 
 
-        is_valid = False
-
         # Check if the domain matches any of the allowed patterns, including subdomains
         domain = parsed.hostname
-        if domain and any(domain == d[1:] or domain.endswith(d) for d in allowed_domains):
-            is_valid = True
-
         path = parsed.path
-        # Special case for "today.uci.edu/department/information_computer_sciences/*"
-        if domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
-            is_valid = True
+        if not domain:
+            return False
 
-        return is_valid
+        if any(domain.endswith(d) for d in allowed_domains):
+            return True
+        # Special case for "today.uci.edu/department/information_computer_sciences/*"
+        elif domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
+            return True
+
+        return False
 
     except TypeError:
         print ("TypeError for ", parsed)
