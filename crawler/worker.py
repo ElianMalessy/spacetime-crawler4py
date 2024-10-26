@@ -25,10 +25,7 @@ class Worker(Thread):
                 break
 
             # wait 500ms for each respective domain before downloading
-            print()
-            print("Waiting")
             self.frontier.wait_for_request(tbd_url)
-            print("Starting")
 
             resp = download(tbd_url, self.config, self.logger)
 

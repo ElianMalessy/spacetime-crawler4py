@@ -104,7 +104,7 @@ class Frontier(object):
 
         with self.lock:
             elapsed_time = current_time - self.last_request_time[domain]
-            print(f"Requesting domain: {domain} at {elapsed_time}")
+            # print(f"Requesting domain: {domain} at {elapsed_time}")
             if elapsed_time < 0.5:  # 500 ms
                 time.sleep(0.5 - elapsed_time)  # Wait for the remaining time
             
@@ -112,10 +112,10 @@ class Frontier(object):
             
     def _get_domain(self, url):
         from urllib.parse import urlparse
-
         subdomain = urlparse(url).hostname
 
-        if any(subdomain.endswith(domain) for domain in self.domains):
-            return subdomain
+        for domain in self.domains:
+            if subdomain.endswith(domain):
+                return domain
         
 

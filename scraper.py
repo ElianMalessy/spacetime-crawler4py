@@ -1,5 +1,5 @@
 import re
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse, urljoin, parse_qs
 from bs4 import BeautifulSoup
 from collections import defaultdict
 
@@ -100,13 +100,15 @@ def is_valid_domain(parsed):
     return False
 
 def is_trap(parsed):
-    if parsed.startswith("mailto"):
+    if parsed[:6] == "mailto":
         return True
 
     site = parsed.netloc + parsed.path
     # Return false if we receive some parameters that know are bad
     # "page", "start", "offset", "limit" are OK but we have to be careful
-    if any(param in trap_params for param in parsed):
+    query_string = parsed.query
+    params = parse_qs(query_string)
+    if any(param in trap_params for param in params.keys()):
         return True
 
     # If the same URL has been crawled more than 10 times, its probably a trap 
