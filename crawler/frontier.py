@@ -78,22 +78,29 @@ class Frontier(object):
     
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
+
+        if urlhash not in self.save:
+            # This should not happen.
+            self.logger.error(
+                f"Completed url {url}, but have not seen it before.")
+
+        self.save[urlhash] = (url, True)
+        self.save.sync()
+
         domain = self._get_domain(url)
+        if not domain:
+            return
 
         with self.lock:
             self.last_request_time[domain] = time.time()
 
-            if urlhash not in self.save:
-                # This should not happen.
-                self.logger.error(
-                    f"Completed url {url}, but have not seen it before.")
-
-            self.save[urlhash] = (url, True)
-            self.save.sync()
 
     def wait_for_request(self, url):
         domain = self._get_domain(url)
         current_time = time.time()
+
+        if not domain:
+            return
 
         with self.lock:
             elapsed_time = current_time - self.last_request_time[domain]
@@ -108,8 +115,7 @@ class Frontier(object):
 
         subdomain = urlparse(url).hostname
 
-        for domain in self.domains:
-            if subdomain.endswith(domain):
-                return domain
+        if any(subdomain.endswith(domain) for domain in self.domains):
+            return subdomain
         
 
