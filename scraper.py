@@ -42,6 +42,14 @@ class Scraper:
         links = []
         soup = BeautifulSoup(resp.raw_response.content, 'lxml')
 
+        html = str(soup)
+        html_size = len(html.encode('utf-8'))
+
+        # 2 mb
+        # TODO check if low information as well
+        if html_size > 2 * 1024 * 1024:
+            return []
+
         # check if should be crawled with tags and text analysis
         nofollow = soup.find("meta", {"name": "robots", "content": re.compile("nofollow")})
         if nofollow:
