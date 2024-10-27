@@ -14,6 +14,7 @@ def download(url, config, logger=None):
             return Response(cbor.loads(resp.content))
     except (EOFError, ValueError) as e:
         pass
+
     logger.error(f"Spacetime Response error {resp} with url {url}.")
     return Response({
         "error": f"Spacetime Response error {resp} with url {url}.",

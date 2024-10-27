@@ -2,6 +2,7 @@ import re
 from urllib.parse import urlparse, urljoin, parse_qs
 from bs4 import BeautifulSoup
 from collections import defaultdict
+import zlib
 
 
 class Scraper:
@@ -38,17 +39,32 @@ class Scraper:
 
         if resp.status != 200:
             return []
+
         
         links = []
         soup = BeautifulSoup(resp.raw_response.content, 'lxml')
 
-        html = str(soup)
-        html_size = len(html.encode('utf-8'))
+        html_string = str(soup).encode('utf-8')
+        current_size = len(html_string)
 
-        # 2 mb
+        is_compressed = resp.raw_response.headers.get('Content-Encoding')
+        compressed_size = resp.raw_response.headers.get('Content-Length')
+        if is_compressed and compressed_size:
+            compressed_size = int(compressed_size)
+
+        else:
+            # if not compressed, compress with zlib
+            zlib_compressed = zlib.compress(html_string)
+            compressed_size = len(zlib_compressed)
+
+        # TODO get a good heuristic for compression (keep in mind the compression algorithms are different)
+        ratio = compressed_size / current_size
+        # print("RATIO: ", ratio)
+
+        # 1 mb
         # TODO check if low information as well
-        if html_size > 2 * 1024 * 1024:
-            return []
+        # if html_size > 1 * 1024 * 1024:
+        #     return []
 
         # check if should be crawled with tags and text analysis
         nofollow = soup.find("meta", {"name": "robots", "content": re.compile("nofollow")})
@@ -78,40 +94,6 @@ class Scraper:
         return links
 
 
-
-    def is_valid(self, url):
-        # Decide whether to crawl this url or not. 
-        # If you decide to crawl it, return True; otherwise return False.
-        # There are already some conditions that return False.
-
-        try:
-            parsed = urlparse(url)
-            if parsed.scheme not in set(["http", "https"]):
-                return False
-
-            if re.match(
-                r".*\.(css|js|bmp|gif|jpe?g|ico"
-                    + r"|png|tiff?|mid|mp2|mp3|mp4"
-                    + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
-                    + r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
-                    + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
-                    + r"|epub|dll|cnf|tgz|sha1"
-                    + r"|thmx|mso|arff|rtf|jar|csv"
-                    + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower()):
-                return False
-
-            if not self.is_valid_domain(parsed):
-                return False
-
-            if self.is_trap(parsed):
-                return False
-
-            return True
-
-        except TypeError:
-            print ("TypeError for ", parsed)
-            raise
-
     def is_valid_domain(self, parsed):
         # Check if the domain matches any of the allowed patterns, including subdomains
         domain = parsed.hostname
@@ -119,9 +101,7 @@ class Scraper:
         if not domain:
             return False
 
-        if any(domain.endswith(d) for d in self.allowed_domains):
-            return True
-            # Special case for "today.uci.edu/department/information_computer_sciences/*"
+        if any(domain.endswith(d) for d in self.allowed_domains): return True # Special case for "today.uci.edu/department/information_computer_sciences/*"
         elif domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
             return True
         
@@ -143,10 +123,44 @@ class Scraper:
 
         return False
 
+
 s = Scraper()
 
 def scraper(url, resp):
     links = s.extract_next_links(url, resp)
 
-    return [link for link in links if s.is_valid(link)]
+    return [link for link in links if is_valid(link)]
+
+def is_valid(url):
+    # Decide whether to crawl this url or not. 
+    # If you decide to crawl it, return True; otherwise return False.
+    # There are already some conditions that return False.
+
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in set(["http", "https"]):
+            return False
+
+        if re.match(
+            r".*\.(css|js|bmp|gif|jpe?g|ico"
+                + r"|png|tiff?|mid|mp2|mp3|mp4"
+                + r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
+                + r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
+                + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
+                + r"|epub|dll|cnf|tgz|sha1"
+                + r"|thmx|mso|arff|rtf|jar|csv"
+                + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed.path.lower()):
+            return False
+
+        if not s.is_valid_domain(parsed):
+            return False
+
+        if s.is_trap(parsed):
+            return False
+
+        return True
+
+    except TypeError:
+        print ("TypeError for ", parsed)
+        raise
 
