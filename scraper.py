@@ -138,10 +138,8 @@ class Scraper:
             href = link.get('href')
             if href is not None:
                 # Join relative links to the base URL.
-                full_url = urldefrag(urljoin(resp.url, href, allow_fragments=False))
-
+                full_url = urldefrag(urljoin(resp.url, href, allow_fragments=False)).url
                 parsed_full_url = urlparse(full_url)
-                parsed_full_url.get_url()
 
                 # Remove ordering query parameters from the URL.
                 queries = parse_qs(parsed_full_url.query)
