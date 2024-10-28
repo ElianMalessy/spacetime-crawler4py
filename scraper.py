@@ -91,7 +91,7 @@ class Scraper:
             return []
 
         content_type = resp.raw_response.headers.get('Content-Type', '')
-        encoding = content_type.split('charset=')[1] if content_type else 'utf-8'
+        encoding = content_type.split('charset=')[1] if content_type and 'charset=' in content_type else 'utf-8'
         html_content = resp.raw_response.content.decode(encoding, errors='replace')
 
         soup = BeautifulSoup(html_content, 'lxml')
