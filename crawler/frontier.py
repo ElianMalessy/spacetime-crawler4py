@@ -118,4 +118,3 @@ class Frontier(object):
             if subdomain.endswith(domain):
                 return domain
         
-
