@@ -72,6 +72,11 @@ class Scraper:
 
         # Webpage uniqueness is based on the URL, not the content.
         # The total number of unique pages is the sum of either the site_counts or the subdomain_counts.
+
+        # if status is 404, we don't count the page because it doesn't exist
+        if resp.status == 404:
+            return []
+
         parsed_url = urlparse(url)
         self.visited_urls.add(url)
         self.subdomain_counts[parsed_url.hostname] += 1
@@ -86,7 +91,7 @@ class Scraper:
             self.subdomain_counts[resp_parsed_url.hostname] += 1
             self.site_counts[resp_parsed_url.netloc + resp_parsed_url.path] += 1
 
-        # Ignore any HTTP responses that are not 200 OK.
+        # Ignore any HTTP responses that are not 200
         if resp.status != 200:
             return []
 
@@ -136,6 +141,7 @@ class Scraper:
         if self.is_similar(tokens):
             return []
 
+        # Now its ok to crawl the page.
         # Update the statistics for the length of the longest page and the token counts.
         self.max_page_len = max(self.max_page_len, len(tokens))
         for token in tokens:
