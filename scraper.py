@@ -95,8 +95,9 @@ class Scraper:
         html_content = resp.raw_response.content.decode(encoding, errors='replace')
 
         soup = BeautifulSoup(html_content, 'lxml')
-        if soup.name.lower() != 'html': 
+        if not soup.html: 
             # File is not valid html
+            print("File is not valid html: ", resp.url)
             return []
 
         # URLs will still be counted as visited regardless, but:
