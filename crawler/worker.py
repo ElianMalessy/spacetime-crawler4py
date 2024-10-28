@@ -40,3 +40,8 @@ class Worker(Thread):
 
             time.sleep(self.config.time_delay)
 
+        # Logging statistics after crawling for report questions
+        self.frontier.log_num_unique_urls()
+        self.frontier.log_longest_page()
+        self.frontier.log_top_words()
+        self.frontier.log_subdomain_counts()

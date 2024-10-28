@@ -5,7 +5,7 @@ from threading import Thread, RLock
 from queue import Queue, Empty
 
 from utils import get_logger, get_urlhash, normalize
-from scraper import is_valid
+from scraper import is_valid, s
 
 import time
 
@@ -117,4 +117,27 @@ class Frontier(object):
         for domain in self.domains:
             if subdomain.endswith(domain):
                 return domain
-        
+
+    # Get number of unique URLs found after discarding the fragment part
+    def log_num_unique_urls(self):
+        unique_url_count = len(self.save)
+        self.logger.info(f"Number of unique pages: {unique_url_count}")
+
+    # Get the longest page (page with the highest word count)
+    def log_longest_page(self):
+        longest_page_len = s.max_page_len
+        self.logger.info(f"The longest page in terms of number of words has {s.max_page_len} words")
+
+    # Get the 50 most common words from all crawled domains
+    def log_top_words(self):
+        top_words = s.get_top_words()
+        self.logger.info(f"The 50 most common words across all crawled domains:")
+        for index, (word, count) in enumerate(top_words, start=1):
+            self.logger.info(f"{index}. {word}: {count}")
+
+    # Alphabetical list of subdomains in the uci.edu domain, with number of unique pages
+    def log_subdomain_counts(self):
+        subdomain_counts = s.subdomain_counts
+        sorted_subdomains = sorted(subdomain_counts.items())
+        for subdomain, count in sorted_subdomains:
+            self.logger.info(f"{subdomain}, {count}")

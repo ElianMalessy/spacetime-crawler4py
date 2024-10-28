@@ -80,12 +80,12 @@ class Scraper:
         if url != resp.url: # If we are redirected, we count both domain names.
             if not is_valid(resp.url): # First ensure the new URL is valid.
                 return []
-            
+
             resp_parsed_url = urlparse(resp.url)
             self.visited_urls.add(resp.url)
             self.subdomain_counts[resp_parsed_url.hostname] += 1
             self.site_counts[resp_parsed_url.netloc + resp_parsed_url.path] += 1
-        
+
         # Ignore any HTTP responses that are not 200 OK.
         if resp.status != 200:
             return []
@@ -148,7 +148,7 @@ class Scraper:
                 for param in queries.keys():
                     if param.split('[')[0] in self._ordering_params:
                         queries_to_remove.append(param)
-                
+
                 for param in queries_to_remove: # Can only modify dictionary after loop using it.
                     del queries[param]
 
@@ -165,7 +165,7 @@ class Scraper:
                     links.add(full_url)
 
         return list(links)
-    
+
 
     def is_similar(self, tokens):
         # If a given webpage has less than 50 tokens, it has low information value
@@ -173,13 +173,13 @@ class Scraper:
         # tokens, in which case take the 50 with the lowest count within the webpage.
         # This guarantees the webpage's hashed fingerprint will be built from the 50
         # most unique tokens within the webpage.
-        
+
         # Build token counts for this webpage.
         page_token_counts = defaultdict(int)
         for token in tokens:
             if token not in self._stopwords:
                 page_token_counts[token] += 1
-        
+
         # Extract just the uncommon tokens from this webpage. Use frozenset for
         # immutability to enable hashing and for set intersection.
         sorted_page_token_counts = sorted(page_token_counts.items(), key=lambda item: item[1])
@@ -190,14 +190,14 @@ class Scraper:
         site_hash = hash(uncommon_tokens)
         if site_hash in self.site_hashes:
             return True
-        
+
         # Detect near similarity. If 85% or more of the most unique tokens are shared in common
         # with any webpage, then this webpage is likely a near duplicate of the other webpage.
         for other_page_uncommon_tokens in self.site_uncommon_tokens:
             similarity = len(uncommon_tokens & other_page_uncommon_tokens) / len(other_page_uncommon_tokens)
             if similarity >= 0.85:
                 return True
-        
+
         # If the webpage is unique (not sufficiently similar to other webpages),
         # update the containers which hold the data used for similarity detection.
         self.site_hashes.add(site_hash)
@@ -219,7 +219,7 @@ class Scraper:
         # Special case for "today.uci.edu/department/information_computer_sciences/*".
         elif domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
             return True
-        
+
         return False
 
 
@@ -276,3 +276,7 @@ def is_valid(url):
         print ("TypeError for ", parsed_url)
         raise
 
+def get_top_words(self):
+    # Sort all tokens by highest count and take the first 50
+    sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
+    return sorted_tokens[:50]
