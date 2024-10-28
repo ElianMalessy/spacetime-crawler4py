@@ -90,8 +90,14 @@ class Scraper:
         if resp.status != 200:
             return []
 
-        links = set()
-        soup = BeautifulSoup(resp.raw_response.content, 'lxml')
+        content_type = resp.raw_response.headers.get('Content-Type', '')
+        encoding = content_type.split('charset=')[1] if content_type else 'utf-8'
+        html_content = resp.raw_response.content.decode(encoding, errors='replace')
+
+        soup = BeautifulSoup(html_content, 'lxml')
+        if soup.name.lower() != 'html': 
+            # File is not valid html
+            return []
 
         # URLs will still be counted as visited regardless, but:
         #   - If a webpage's raw HTML is greater than 500 KB, regardless of token count,
@@ -107,8 +113,9 @@ class Scraper:
         #   - If a webpage's raw HTML is greater than 300 KB AND its content contains
         #     less than 100 tokens, it is fairly large while also likely having low
         #     information value, so it is not worth extracting new links from.
+
         content_length = resp.raw_response.headers.get('Content-Length')
-        html_size = int(content_length) if content_length else len(resp.raw_response.content.decode('utf-8'))
+        html_size = int(content_length) if content_length else len(html_content)
 
         text = soup.get_text()
         text.lower()
@@ -117,8 +124,8 @@ class Scraper:
         MAX_HTML_SIZE = 500000
         MIN_TOKENS = 50
         html_too_large = html_size > MAX_HTML_SIZE
-        not_enough_tokens = not soup.body or len(tokens) < MIN_TOKENS
-        not_enough_tokens_for_large_html = html_size > MAX_HTML_SIZE - 200000 and (not soup.body or len(tokens) < MIN_TOKENS * 2)
+        not_enough_tokens = len(tokens) < MIN_TOKENS
+        not_enough_tokens_for_large_html = html_size > MAX_HTML_SIZE - 200000 and (len(tokens) < MIN_TOKENS * 2)
 
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return []
@@ -134,6 +141,7 @@ class Scraper:
                 self.token_counts[token] += 1
 
         # Extract all links in the webpage.
+        links = set()
         for link in soup.find_all('a', href=True):
             href = link.get('href')
             if href is not None:
@@ -265,7 +273,8 @@ def is_valid(url):
                 + r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
                 + r"|epub|dll|cnf|tgz|sha1"
                 + r"|thmx|mso|arff|rtf|jar|csv"
-                + r"|rm|smil|wmv|swf|wma|zip|rar|gz)$", parsed_url.path.lower()):
+                + r"|rm|smil|wmv|swf|wma|zip|rar|gz"
+                + r"ppsx|pptx)$", parsed_url.path.lower()):
             return False
 
         if not s.is_valid_domain(parsed_url) or s.is_trap(parsed_url):
@@ -279,4 +288,4 @@ def is_valid(url):
 def get_top_words(self):
     # Sort all tokens by highest count and take the first 50
     sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
-    return sorted_tokens[:50]
+    return sorted_tokens[:51]
