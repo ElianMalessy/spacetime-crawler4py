@@ -26,7 +26,7 @@ class Scraper:
 
     def __init__(self):
         self.visited_urls = set() # Used for reporting how many unique pages were found.
-        self.subdomain_counts = defaultdict(int) # Used for reporting how many subdomains were found.
+        self.subdomain_counts = defaultdict(int) # Used for reporting how many subdomains were found + unique pages in them.
         self.site_counts = defaultdict(int) # Used for checking if the crawler has been trapped.
         self.token_counts = defaultdict(int) # Used for reporting the top 50 most common words and for similarity detection.
         self.max_page_len = 0 # Used for reporting the longest page by measure of word count.
@@ -45,20 +45,20 @@ class Scraper:
         #         resp.raw_response.url: the url, again
         # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-        # Webpage uniqueness is based on the URL, not the content.
-        # The total number of unique pages is the sum of either the site_counts or the subdomain_counts.
 
-        # if status is 404, we don't count the page because it doesn't exist
+        # If status is 404, we don't count the page because it doesn't exist
         if resp.status == 404:
             return []
 
+        # Webpage uniqueness is based on the URL, not the content.
+        # The total number of unique pages is the sum of either the site_counts or the subdomain_counts.
         parsed_url = urlparse(url)
         self.visited_urls.add(url)
         self.subdomain_counts[parsed_url.hostname] += 1
         self.site_counts[parsed_url.netloc + parsed_url.path] += 1
 
         if url != resp.url: # If we are redirected, we count both domain names.
-            if not is_valid(resp.url): # First ensure the new URL is valid.
+            if not is_valid(resp.url) or resp.url in self.visited_urls: # First ensure the new URL is valid.
                 return []
 
             resp_parsed_url = urlparse(resp.url)
@@ -76,9 +76,8 @@ class Scraper:
         html_content = resp.raw_response.content.decode(encoding, errors='replace')
 
         soup = BeautifulSoup(html_content, 'lxml')
-        if not soup.html: 
+        if not soup or not soup.html: 
             # File is not valid html
-            print("File is not valid html: ", resp.url)
             return []
 
         # URLs will still be counted as visited regardless, but:

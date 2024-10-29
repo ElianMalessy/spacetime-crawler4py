@@ -6,6 +6,7 @@ from utils import get_logger
 import scraper
 import time
 
+import contextlib
 
 class Worker(Thread): 
     def __init__(self, worker_id, config, frontier):
@@ -18,7 +19,17 @@ class Worker(Thread):
         super().__init__(daemon=True)
     
     def run(self):
+        i = 0
         while True:
+            if i == 1000:
+                with open('output_log.txt', 'w') as f:
+                    with contextlib.redirect_stdout(f):
+                        self.frontier.log_num_unique_urls()
+                        self.frontier.log_longest_page()
+                        self.frontier.log_top_words()
+                        self.frontier.log_subdomain_counts()
+                i = 0
+
             tbd_url = self.frontier.get_tbd_url()
             if not tbd_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
@@ -38,14 +49,18 @@ class Worker(Thread):
                 scraped_urls = scraper.scraper(tbd_url, resp)
 
             for scraped_url in scraped_urls:
+                print(scraped_url)
                 self.frontier.add_url(scraped_url)
             self.frontier.mark_url_complete(tbd_url)
 
             # 100ms delay after every request to avoid overloading the server
             time.sleep(0.1)
+            i += 1
 
+        with self.frontier.lock:
+            self.frontier.log_num_unique_urls()
+            self.frontier.log_longest_page()
+            self.frontier.log_top_words()
+            self.frontier.log_subdomain_counts()
         # Logging statistics after crawling for report questions
-        self.frontier.log_num_unique_urls()
-        self.frontier.log_longest_page()
-        self.frontier.log_top_words()
-        self.frontier.log_subdomain_counts()
+

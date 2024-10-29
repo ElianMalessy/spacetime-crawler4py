@@ -17,13 +17,6 @@ class Frontier(object):
 
         self.lock = RLock()
 
-        # self.domains = [
-        #     "ics.uci.edu",
-        #     "cs.uci.edu",
-        #     "informatics.uci.edu",
-        #     "stat.uci.edu",
-        #     "today.uci.edu"
-        # ]
         self.last_request_time = defaultdict(float) # Track the last request time for each domain 
         
         if not os.path.exists(self.config.save_file) and not restart:
@@ -61,10 +54,11 @@ class Frontier(object):
             self.logger.info(
                 f"Found {tbd_count} urls to be downloaded from {total_count} "
                 f"total urls discovered.")
+            
 
     def get_tbd_url(self):
         try:
-            return self.to_be_downloaded.get()
+            return self.to_be_downloaded.get(timeout=3)
         except Empty:
             return None
 
@@ -115,10 +109,6 @@ class Frontier(object):
         from urllib.parse import urlparse
         subdomain = urlparse(url).hostname
         return subdomain
-
-        #for domain in self.domains:
-        #    if subdomain.endswith(domain):
-        #        return domain
 
     # Get number of unique URLs found after discarding the fragment part
     def log_num_unique_urls(self):
