@@ -127,6 +127,8 @@ class Scraper:
         text = soup.get_text()
         text.lower()
         tokens = re.findall(r'[^\W_]+', text)
+        anchors = soup.find_all('a', href=True)
+        anchors_ratio = len(anchors) / len(tokens)
         # print(tokens)
         # print(len(tokens))
 
@@ -135,11 +137,10 @@ class Scraper:
         html_too_large = html_size > MAX_HTML_SIZE
         not_enough_tokens = len(tokens) < MIN_TOKENS
         not_enough_tokens_for_large_html = html_size > MAX_HTML_SIZE - 200000 and (len(tokens) < MIN_TOKENS * 2)
-        anchors = soup.find_all('a', href=True)
-        # anchors_ratio = len(anchors) / len(tokens)
-        # print(anchors_ratio)
+        # less than 100 tokens and more than 10 anchors
+        high_anchors_to_tokens_ratio = len(tokens) < MIN_TOKENS * 2 and anchors_ratio >= 0.1
 
-        if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
+        if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html or high_anchors_to_tokens_ratio:
             return []
 
         # Detect and avoid similarity.
