@@ -126,7 +126,7 @@ class Scraper:
         html_size = len(html_content)
         text = soup.get_text()
         text.lower()
-        tokens = re.findall(r'[^\W_]+', text)
+        tokens = re.findall(r'[^\W_]{2,}', text)
         anchors = soup.find_all('a', href=True)
         anchors_ratio = len(anchors) / len(tokens)
         # print(tokens)
