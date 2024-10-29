@@ -7,7 +7,7 @@ import scraper
 import time
 
 
-class Worker(Thread):
+class Worker(Thread): 
     def __init__(self, worker_id, config, frontier):
         self.logger = get_logger(f"Worker-{worker_id}", "Worker")
         self.config = config
@@ -16,7 +16,7 @@ class Worker(Thread):
         assert {getsource(scraper).find(req) for req in {"from requests import", "import requests"}} == {-1}, "Do not use requests in scraper.py"
         assert {getsource(scraper).find(req) for req in {"from urllib.request import", "import urllib.request"}} == {-1}, "Do not use urllib.request in scraper.py"
         super().__init__(daemon=True)
-        
+    
     def run(self):
         while True:
             tbd_url = self.frontier.get_tbd_url()
@@ -24,7 +24,7 @@ class Worker(Thread):
                 self.logger.info("Frontier is empty. Stopping Crawler.")
                 break
 
-            # wait 500ms for each respective domain before downloading
+            # wait 500ms for each respective subdomain before downloading
             self.frontier.wait_for_request(tbd_url)
 
             resp = download(tbd_url, self.config, self.logger)
@@ -33,12 +33,16 @@ class Worker(Thread):
                 f"Downloaded {tbd_url}, status <{resp.status}>, "
                 f"using cache {self.config.cache_server}.")
 
-            scraped_urls = scraper.scraper(tbd_url, resp)
+
+            with self.frontier.lock:
+                scraped_urls = scraper.scraper(tbd_url, resp)
+
             for scraped_url in scraped_urls:
                 self.frontier.add_url(scraped_url)
             self.frontier.mark_url_complete(tbd_url)
 
-            time.sleep(self.config.time_delay)
+            # 100ms delay after every request to avoid overloading the server
+            time.sleep(0.1)
 
         # Logging statistics after crawling for report questions
         self.frontier.log_num_unique_urls()

@@ -121,18 +121,23 @@ class Scraper:
         #     less than 100 tokens, it is fairly large while also likely having low
         #     information value, so it is not worth extracting new links from.
 
-        content_length = resp.raw_response.headers.get('Content-Length')
-        html_size = int(content_length) if content_length else len(html_content)
+        # content_length = resp.raw_response.headers.get('Content-Length')[2:]
 
+        html_size = len(html_content)
         text = soup.get_text()
         text.lower()
         tokens = re.findall(r'[^\W_]+', text)
+        # print(tokens)
+        # print(len(tokens))
 
         MAX_HTML_SIZE = 500000
         MIN_TOKENS = 50
         html_too_large = html_size > MAX_HTML_SIZE
         not_enough_tokens = len(tokens) < MIN_TOKENS
         not_enough_tokens_for_large_html = html_size > MAX_HTML_SIZE - 200000 and (len(tokens) < MIN_TOKENS * 2)
+        anchors = soup.find_all('a', href=True)
+        # anchors_ratio = len(anchors) / len(tokens)
+        # print(anchors_ratio)
 
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return []
@@ -150,7 +155,7 @@ class Scraper:
 
         # Extract all links in the webpage.
         links = set()
-        for link in soup.find_all('a', href=True):
+        for link in anchors:
             href = link.get('href')
             if href is not None:
                 # Join relative links to the base URL.
@@ -254,6 +259,12 @@ class Scraper:
             return True
 
         return False
+
+    def get_top_words(self):
+        # Sort all tokens by highest count and take the first 50
+        sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
+        return sorted_tokens[:51]
+
 # End class Scraper
 
 
@@ -282,7 +293,7 @@ def is_valid(url):
                 + r"|epub|dll|cnf|tgz|sha1"
                 + r"|thmx|mso|arff|rtf|jar|csv"
                 + r"|rm|smil|wmv|swf|wma|zip|rar|gz"
-                + r"ppsx|pptx)$", parsed_url.path.lower()):
+                + r"|ppsx|pptx)$", parsed_url.path.lower()):
             return False
 
         if not s.is_valid_domain(parsed_url) or s.is_trap(parsed_url):
@@ -293,7 +304,3 @@ def is_valid(url):
         print ("TypeError for ", parsed_url)
         raise
 
-def get_top_words(self):
-    # Sort all tokens by highest count and take the first 50
-    sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
-    return sorted_tokens[:51]

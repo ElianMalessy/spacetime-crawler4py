@@ -6,10 +6,10 @@ from queue import Queue, Empty
 
 from utils import get_logger, get_urlhash, normalize
 from scraper import is_valid, s
-
 import time
 
-class Frontier(object):
+from collections import defaultdict
+class Frontier(object): 
     def __init__(self, config, restart):
         self.logger = get_logger("FRONTIER")
         self.config = config
@@ -17,14 +17,14 @@ class Frontier(object):
 
         self.lock = RLock()
 
-        self.domains = [
-            "ics.uci.edu",
-            "cs.uci.edu",
-            "informatics.uci.edu",
-            "stat.uci.edu",
-            "today.uci.edu"
-        ]
-        self.last_request_time = {domain: 0.0 for domain in self.domains} # Track the last request time for each domain 
+        # self.domains = [
+        #     "ics.uci.edu",
+        #     "cs.uci.edu",
+        #     "informatics.uci.edu",
+        #     "stat.uci.edu",
+        #     "today.uci.edu"
+        # ]
+        self.last_request_time = defaultdict(float) # Track the last request time for each domain 
         
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
@@ -52,7 +52,8 @@ class Frontier(object):
         ''' This function can be overridden for alternate saving techniques. '''
         with self.lock:
             total_count = len(self.save)
-            tbd_count = 0
+            tbd_count = 0 
+
             for url, completed in self.save.values():
                 if not completed and is_valid(url):
                     self.to_be_downloaded.put(url)
@@ -113,10 +114,11 @@ class Frontier(object):
     def _get_domain(self, url):
         from urllib.parse import urlparse
         subdomain = urlparse(url).hostname
+        return subdomain
 
-        for domain in self.domains:
-            if subdomain.endswith(domain):
-                return domain
+        #for domain in self.domains:
+        #    if subdomain.endswith(domain):
+        #        return domain
 
     # Get number of unique URLs found after discarding the fragment part
     def log_num_unique_urls(self):
