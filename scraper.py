@@ -245,7 +245,7 @@ class Scraper:
     def get_top_words(self):
         # Sort all tokens by highest count and take the first 50
         sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
-        return sorted_tokens[:51]
+        return sorted_tokens[:50]
 
 # End class Scraper
 
