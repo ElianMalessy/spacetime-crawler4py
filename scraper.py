@@ -78,6 +78,7 @@ class Scraper:
         soup = BeautifulSoup(html_content, 'lxml')
         if not soup or not soup.html: 
             # File is not valid html
+            # Gets rid of dead 200 urls
             return []
 
         # URLs will still be counted as visited regardless, but:
