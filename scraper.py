@@ -28,10 +28,9 @@ class Scraper:
         self.visited_urls = set() # Used for reporting how many unique pages were found.
         self.subdomain_counts = defaultdict(int) # Used for reporting how many subdomains were found + unique pages in them.
         self.site_counts = defaultdict(int) # Used for checking if the crawler has been trapped.
-        self.token_counts = defaultdict(int) # Used for reporting the top 50 most common words and for similarity detection.
+        self.token_counts = defaultdict(int) # Used for reporting the top 50 most common words.
         self.max_page_len = 0 # Used for reporting the longest page by measure of word count.
-        self.site_hashes = set() # Used for similarity detection. Many membership operations, so use a set.
-        self.site_uncommon_tokens = [] # Used for similarity detection. Many iterations, so use a list.
+        self.site_fingerprints = [] # Used for similarity detection. Many iterations, so use a list.
 
 
     def extract_next_links(self, url, resp):
@@ -172,40 +171,45 @@ class Scraper:
 
 
     def is_similar(self, tokens):
-        # If a given webpage has less than 50 tokens, it has low information value
-        # and will already be filtered out. The webpage may have more than 50
-        # tokens, in which case take the 50 with the lowest count within the webpage.
-        # This guarantees the webpage's hashed fingerprint will be built from the 50
-        # most unique tokens within the webpage.
+        # SimHash algorithm, fixing binary hash width to 1st through 32nd bits,
+        # which avoids a preceding negative. Oftentimes the width of the
+        # binary-formatted string of the hash will be slightly less than 64
+        # (61, 63, etc.), so 32 was chosen as a consistently deliverable power of 2.
+        # 80% was chosen as the threshold.
+        WIDTH = 32
+        THRESHOLD = 0.8
 
         # Build token counts for this webpage.
         page_token_counts = defaultdict(int)
         for token in tokens:
             if token not in self._stopwords:
                 page_token_counts[token] += 1
-
-        # Extract just the uncommon tokens from this webpage. Use frozenset for
-        # immutability to enable hashing and for set intersection.
-        sorted_page_token_counts = sorted(page_token_counts.items(), key=lambda item: item[1])
-        uncommon_tokens = frozenset(token_count[0] for token_count in sorted_page_token_counts[:51])
-
-        # Detect exact similarity. If the hashed fingerprint of this webpage is the same as any other
-        # webpage, then this webpage is likely an exact duplicate of the other webpage.
-        site_hash = hash(uncommon_tokens)
-        if site_hash in self.site_hashes:
-            return True
-
-        # Detect near similarity. If 85% or more of the most unique tokens are shared in common
-        # with any webpage, then this webpage is likely a near duplicate of the other webpage.
-        for other_page_uncommon_tokens in self.site_uncommon_tokens:
-            similarity = len(uncommon_tokens & other_page_uncommon_tokens) / len(other_page_uncommon_tokens)
-            if similarity >= 0.85:
+        
+        # Build 32-dimensional vector V to hold weighted components.
+        vec_v = [0] * WIDTH
+        for token, weight in page_token_counts.items():
+            # Convert the hash of the current token to a binary string
+            # format and slice indices 1 through 32 to avoid an initial '-'.
+            fixed_width_binary_token_hash_str = '{:b}'.format(hash(token))[1:33]
+            for i in range(WIDTH):
+                bit = fixed_width_binary_token_hash_str[i]
+                vec_v[i] += weight if bit == '1' else -1 * weight
+        
+        # Reduce V back to binary vased on whether V[i] is positive or negative.
+        # V is now the fingerprint of this webpage.
+        for i in range(len(vec_v)):
+            vec_v[i] = 1 if vec_v[i] >= 0 else 0
+        
+        # Compute the similarity factor and compare it to the threshold.
+        for fingerprint in self.site_fingerprints:
+            same_bits = sum(1 if vec_v[i] == fingerprint[i] else 0 for i in range(WIDTH))
+            similarity = same_bits / WIDTH
+            if similarity >= THRESHOLD:
                 return True
-
+        
         # If the webpage is unique (not sufficiently similar to other webpages),
-        # update the containers which hold the data used for similarity detection.
-        self.site_hashes.add(site_hash)
-        self.site_uncommon_tokens.append(uncommon_tokens)
+        # update the list of fingerprints for visited webpages.
+        self.site_fingerprints.append(vec_v)
 
         return False
 
