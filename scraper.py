@@ -2,14 +2,12 @@ import re
 from urllib.parse import urlparse, urljoin, parse_qs, urldefrag, urlencode, urlunparse
 from bs4 import BeautifulSoup
 from collections import defaultdict
+import numpy as np
 
 
 class Scraper:
     # Subdomains of uci.edu to crawl within the styx web cache.
-    _allowed_domains = frozenset([ "ics.uci.edu",
-                                  "cs.uci.edu",
-                                  "informatics.uci.edu",
-                                  "stat.uci.edu" ])
+    _allowed_domains = [ "ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu" ]
 
     # URL Query parameters that definitely indicate crawler traps.
     _trap_params = frozenset( [ "reply", "comment", "message", "print", "format", "output",
@@ -31,6 +29,11 @@ class Scraper:
         self.token_counts = defaultdict(int) # Used for reporting the top 50 most common words.
         self.max_page_len = 0 # Used for reporting the longest page by measure of word count.
         self.site_fingerprints = [] # Used for similarity detection. Many iterations, so use a list.
+
+        # Used for tf-idf
+        self.MAX_DOCUMENTS = 100
+        self.n_documents = 0 # n_documents
+        self.document_frequency = defaultdict(int)
 
 
     def extract_next_links(self, url, resp):
@@ -100,11 +103,12 @@ class Scraper:
         html_size = len(html_content)
         text = soup.get_text()
         text.lower()
-        tokens = re.findall(r'[^\W_]{2,}', text)
+        tokens = np.array(re.findall(r'[^\W_]{2,}', text))
         anchors = soup.find_all('a', href=True)
         buttons = soup.find_all('button')
 
-        n_informational_tokens = sum(token not in self._stopwords for token in tokens)
+        informational_tokens = np.array([token for token in tokens if token not in self._stopwords])
+        n_informational_tokens = len(informational_tokens)
 
         n_anchor_tokens = sum(token not in self._stopwords for anchor in anchors for token in re.findall(r'[^\W_]{2,}', anchor.get_text()))
         n_button_tokens = sum(token not in self._stopwords for button in buttons for token in re.findall(r'[^\W_]{2,}', button.get_text()))
@@ -112,8 +116,6 @@ class Scraper:
         # Remove tokens from the anchor and button text from the total token count.
         n_informational_tokens -= n_anchor_tokens
         n_informational_tokens -= n_button_tokens
-                    
-        # print(n_informational_tokens)
 
         MAX_HTML_SIZE = 500000
         MIN_TOKENS = 50
@@ -124,16 +126,27 @@ class Scraper:
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return []
 
+
+        if self.n_documents < self.MAX_DOCUMENTS:
+            # Update document frequency
+            for token in np.unique(informational_tokens):
+                self.document_frequency[token] += 1
+
+            self.n_documents += 1
+
         # Detect and avoid similarity.
-        if self.is_similar(tokens):
+        elif self.is_similar_np(informational_tokens):
+            print()
+            print("Similarity detected:")
+            print()
             return []
 
-        # Now its ok to crawl the page.
         # Update the statistics for the length of the longest page and the token counts.
         self.max_page_len = max(self.max_page_len, len(tokens))
         for token in tokens:
             if token not in self._stopwords:
                 self.token_counts[token] += 1
+
 
         # Extract all links in the webpage.
         links = set()
@@ -170,48 +183,68 @@ class Scraper:
         return list(links)
 
 
-    def is_similar(self, tokens):
-        # SimHash algorithm, fixing binary hash width to 1st through 32nd bits,
+    def is_similar_np(self, tokens):
+        # SimHash algorithm, fixing binary hash width to 1st through 64 bits,
         # which avoids a preceding negative. Oftentimes the width of the
-        # binary-formatted string of the hash will be slightly less than 64
-        # (61, 63, etc.), so 32 was chosen as a consistently deliverable power of 2.
-        # 80% was chosen as the threshold.
-        WIDTH = 32
-        THRESHOLD = 0.8
+        # binary-formatted string of the hash will be slightly less than 64 so we need to adjust
+
+        WIDTH = 64
+        THRESHOLD = 0.95
+
+        # Build 64-dimensional vector V to hold weighted components.
+        vec_v = np.zeros(WIDTH, dtype=np.float64)
 
         # Build token counts for this webpage.
-        page_token_counts = defaultdict(int)
+        term_frequency = defaultdict(int)
         for token in tokens:
-            if token not in self._stopwords:
-                page_token_counts[token] += 1
-        
-        # Build 32-dimensional vector V to hold weighted components.
-        vec_v = [0] * WIDTH
-        for token, weight in page_token_counts.items():
+            term_frequency[token] += 1
+
+        for token, frequency in term_frequency.items():
+            tf = frequency / len(term_frequency)
+            idf = np.log10(self.MAX_DOCUMENTS / (1 + self.document_frequency[token]))
+
+            # if it appeared in all 100 documents or just 99
+            if idf <= 0:
+                idf = 0.001
+
+            # weight
+            tf_idf = tf * idf
+
             # Convert the hash of the current token to a binary string
-            # format and slice indices 1 through 32 to avoid an initial '-'.
-            fixed_width_binary_token_hash_str = '{:b}'.format(hash(token))[1:33]
-            for i in range(WIDTH):
-                bit = fixed_width_binary_token_hash_str[i]
-                vec_v[i] += weight if bit == '1' else -1 * weight
-        
+            hashed_token = hash(token)
+            hashed_str = '{:b}'.format(hashed_token)
+
+            if hashed_token < 0:
+                hashed_str = hashed_str[1:]
+                # print('{:b}'.format(hashed_token), len(hashed_str))
+                for _ in range(64 - len(hashed_str)):
+                    hashed_str = '1' + hashed_str
+            else:
+                # print('{:b}'.format(hashed_token), len(hashed_str))
+                for _ in range(64 - len(hashed_str)):
+                    hashed_str = '0' + hashed_str
+
+            bits = np.array([1.0 if bit == '1' else -1.0 for bit in hashed_str], dtype=np.float64)
+
+            # print("Token:", token)
+            # print("TF-IDF:", tf_idf)
+            # print(bits)
+            # print(vec_v)
+            vec_v += tf_idf * bits
+
         # Reduce V back to binary vased on whether V[i] is positive or negative.
         # V is now the fingerprint of this webpage.
-        for i in range(len(vec_v)):
-            vec_v[i] = 1 if vec_v[i] >= 0 else 0
-        
-        # Compute the similarity factor and compare it to the threshold.
+        vec_v = np.where(vec_v >= 0, 1, 0)
+
         for fingerprint in self.site_fingerprints:
-            same_bits = sum(1 if vec_v[i] == fingerprint[i] else 0 for i in range(WIDTH))
+            same_bits = np.sum(vec_v == fingerprint)
             similarity = same_bits / WIDTH
-            if similarity >= THRESHOLD:
+            if similarity >= THRESHOLD:      
                 return True
         
         # If the webpage is unique (not sufficiently similar to other webpages),
         # update the list of fingerprints for visited webpages.
         self.site_fingerprints.append(vec_v)
-
-        return False
 
 
     def is_valid_domain(self, parsed_url):
@@ -222,10 +255,12 @@ class Scraper:
         if not domain:
             return False
 
-        if any(domain.endswith(d) for d in self._allowed_domains):
-            return True
-            # Special case for "today.uci.edu/department/information_computer_sciences/*".
-        elif domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
+        for d in self._allowed_domains:
+            if domain == d or domain.endswith("." + d):
+                return True
+
+        # Special case for "today.uci.edu/department/information_computer_sciences/*".
+        if domain == "today.uci.edu" and path.startswith("/department/information_computer_sciences/"):
             return True
 
         return False
