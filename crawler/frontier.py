@@ -112,12 +112,11 @@ class Frontier(object):
 
     # Get number of unique URLs found after discarding the fragment part
     def log_num_unique_urls(self):
-        unique_url_count = len(self.save)
+        unique_url_count = len(s.visited_urls)
         self.logger.info(f"Number of unique pages: {unique_url_count}")
 
     # Get the longest page (page with the highest word count)
     def log_longest_page(self):
-        longest_page_len = s.max_page_len
         self.logger.info(f"The longest page in terms of number of words has {s.max_page_len} words")
 
     # Get the 50 most common words from all crawled domains

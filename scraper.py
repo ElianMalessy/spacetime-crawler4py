@@ -51,7 +51,7 @@ class Scraper:
             return []
 
         # Webpage uniqueness is based on the URL, not the content.
-        # The total number of unique pages is the sum of either the site_counts or the subdomain_counts.
+        # The total number of unique pages is len(visited_urls)
         parsed_url = urlparse(url)
 
         self.visited_urls.add(url)
@@ -61,7 +61,7 @@ class Scraper:
         if url != resp.url: # If we are redirected, we count both domain names.
             # replace the parsed_url
             if not is_valid(resp.url) or resp.url in self.visited_urls: # First ensure the new URL is valid.
-                # If the current url is invalid because of its parameters, try to visit the non-parameterized url.
+                # If the current url is invalid because of its parameters, try to visit the non-parameterized url. 
                 # Otherwise its irredeemable.
 
                 full_url = self._remove_query_params(resp.url, self._bad_params | self._order_params)
