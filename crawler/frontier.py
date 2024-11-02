@@ -129,6 +129,7 @@ class Frontier(object):
 
     # Alphabetical list of subdomains in the uci.edu domain, with number of unique pages
     def log_subdomain_counts(self):
+        self.logger.info(f"Number of subdomains: {len(s.subdomain_counts)}")
         subdomain_counts = s.subdomain_counts
         sorted_subdomains = sorted(subdomain_counts.items())
         for subdomain, count in sorted_subdomains:

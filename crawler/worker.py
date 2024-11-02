@@ -6,8 +6,6 @@ from utils import get_logger
 import scraper
 import time
 
-import contextlib
-
 class Worker(Thread): 
     def __init__(self, worker_id, config, frontier):
         self.logger = get_logger(f"Worker-{worker_id}", "Worker")
@@ -19,7 +17,16 @@ class Worker(Thread):
         super().__init__(daemon=True)
     
     def run(self):
+        i = -1
         while True:
+            i += 1
+            if i % 100 == 0:
+                with self.frontier.lock:
+                    self.frontier.log_num_unique_urls()
+                    self.frontier.log_longest_page()
+                    self.frontier.log_top_words()
+                    self.frontier.log_subdomain_counts()
+
             tbd_url = self.frontier.get_tbd_url()
             if not tbd_url:
                 self.logger.info("Frontier is empty. Stopping Crawler.")
