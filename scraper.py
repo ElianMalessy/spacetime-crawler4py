@@ -53,7 +53,6 @@ class Scraper:
         # Webpage uniqueness is based on the URL, not the content.
         # The total number of unique pages is len(visited_urls)
         parsed_url = urlparse(url)
-
         self.visited_urls.add(url)
         self.subdomain_counts[parsed_url.hostname] += 1
         self.site_counts[parsed_url.netloc + parsed_url.path] += 1
@@ -78,7 +77,10 @@ class Scraper:
         if resp.status != 200:
             return []
 
-        html_content = resp.raw_response["content"]
+        content_type = resp.raw_response.headers.get('Content-Type', '')
+        charset = re.search(r'charset=([^;\s]+)', content_type)
+        encoding = charset.group(1) if charset else 'utf-8'
+        html_content = resp.raw_response.content.decode(encoding, errors='replace')
         if not html_content:
             return []
 
