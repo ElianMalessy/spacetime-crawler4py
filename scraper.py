@@ -120,8 +120,9 @@ class Scraper:
         anchors = soup.find_all('a', href=True)
         for anchor in anchors:
             for token in re.findall(r'[^\W_]{2,}', anchor.get_text()):
-                term_frequency[token] -= 1
-                n_informational_tokens -= 1
+                if token not in self._stopwords:
+                    term_frequency[token] -= 1
+                    n_informational_tokens -= 1
 
 
         MAX_HTML_SIZE = 500000
@@ -133,11 +134,12 @@ class Scraper:
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return []
 
+
         if parsed_url.hostname not in self.subdomain_similarity:
             self.subdomain_similarity[parsed_url.hostname] = [0, defaultdict(int), []]
         # [0] is n_documents [1] is document_frequency [2] is fingerprints
-
         similarity = self.subdomain_similarity[parsed_url.hostname]
+
         # To compare similarity, 20 documents from this subdomain must be seen
         # This avoid the issue of initial innacurate fingerprints
         if similarity[0] < self.MAX_DOCUMENTS:
@@ -191,6 +193,7 @@ class Scraper:
         for token, frequency in term_frequency.items():
             if frequency == 0:
                 continue
+            # normalize tf
             tf = frequency / len(term_frequency)
             idf = np.log10(self.MAX_DOCUMENTS / (1 + document_frequency[token]))
 
@@ -230,7 +233,6 @@ class Scraper:
         # If the webpage is unique (not sufficiently similar to other webpages),
         # update the list of fingerprints for visited webpages.
         fingerprints.append(vec_v)
-
 
         return False
 
