@@ -117,7 +117,7 @@ class Frontier(object):
 
     # Get the longest page (page with the highest word count)
     def log_longest_page(self):
-        self.logger.info(f"The longest page in terms of number of words has {s.max_page_len} words")
+        self.logger.info(f"The longest page, {s.max_page_url} has {s.max_page_len} words")
 
     # Get the 50 most common words from all crawled domains
     def log_top_words(self):
