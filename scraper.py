@@ -80,52 +80,64 @@ class Scraper:
         if not anchors and not soup.find('div'):
             # If the document does not contain anchor or division tags, it is likely not valid HTML.
             return []
-        for element in anchors:
-            element.extract()
 
-        term_frequencies = defaultdict(int) # Frequency of each token in the document.
+        # Size of the html content in bytes
+        html_size = len(html_content)
 
-        # Count isolated informational tokens (alphanumeric sequences of length 2 or more with no underscores).
+        # Get the number of tokens in the html
+        # Tokens are alphanumeric sequences of length 1 or more with no underscores
+        n_tokens = len(re.findall(r'[^\W_]+', soup.get_text().lower()))
+
+        # Remove the anchors from the page to count n_informational_tokens
+        # Informational tokens are of length 2 or more, not in an <a> tag and are not stopwords
+        for anchor in anchors:
+            anchor.extract()
+
+
+        # Get the term frequency of each token in the document for tf-idf
+        # Don't count stopwords for term_frequency and n_informational_tokens
         informational_tokens = re.findall(r'[^\W_]{2,}', soup.get_text().lower())
-        num_info_tokens = 0
+        n_informational_tokens = 0
+        term_frequencies = defaultdict(int)
+
         for token in informational_tokens:
             if token not in self._stopwords:
+                n_informational_tokens += 1
                 term_frequencies[token] += 1
-                num_info_tokens += 1
 
-        # Still include anchor text tokens in the total count since page layouts often share anchors.
-        total_num_tokens = len(informational_tokens)
+        # Anchor text is not high information most of the time but we count it in term_frequency because layouts share anchors
         for anchor in anchors:
             anchor_tokens = re.findall(r'[^\W_]{2,}', anchor.get_text().lower())
-            total_num_tokens += len(anchor_tokens)
             for token in anchor_tokens:
                 if token not in self._stopwords:
                     term_frequencies[token] += 1
 
+
         # If the document has low information value or is simply too large, do not crawl.
-        if not self._has_high_information_value(html_content, num_info_tokens):
+        if not self._has_high_information_value(html_size, n_informational_tokens):
             return []
 
         if parsed_url.hostname not in self.subdomain_similarity:
             # Initialize similarity record for new subdomains with 0 documents, an empty token mapping, and no fingerprints.
+            # [0] is n_documents [1] is document_frequency [2] is fingerprints
             self.subdomain_similarity[parsed_url.hostname] = [0, defaultdict(int), []]
 
         # Scrape 20 pages/documents from this subdomain to capture a foundation of common words
-        # and page layouts. Only begin fingerprinting after this training period and within the 
+        # and page layouts. Only begin fingerprinting after this training period within the 
         # same subdomain for greater reliability.
         similarity = self.subdomain_similarity[parsed_url.hostname]
         if similarity[0] < self.MAX_DOCUMENTS:
             similarity[0] += 1
             for token in term_frequencies.keys():
                 similarity[1][token] += 1
-        elif self._is_similar(term_frequencies, total_num_tokens, similarity[1], similarity[2]):
+        elif self._is_similar(term_frequencies, n_informational_tokens, similarity[1], similarity[2]):
             # Do not crawl exact or near duplicate pages after training period.
             return []
 
-        # Update longest page length and top 50 token counts statistics.
-        if total_num_tokens > self.max_page_len:
+        # Update longest page in terms of n_tokens and top 50 token counts statistics.
+        if n_tokens > self.max_page_len:
             self.max_page_url = resp.url
-            self.max_page_len = total_num_tokens
+            self.max_page_len = n_tokens
         for token, count in term_frequencies.items():
             self.token_counts[token] += count
         
@@ -185,7 +197,7 @@ class Scraper:
         return parsed_url
     
 
-    def _has_high_information_value(self, html_content, num_info_tokens):
+    def _has_high_information_value(self, html_size, num_info_tokens):
         # URLs will still be counted as visited regardless, but:
         #   - If a page's raw HTML is greater than 500 KB, regardless of token
         #     count, it is too large to be worth extracting new links from.
@@ -202,7 +214,6 @@ class Scraper:
         #     having low information value, so it is not worth extracting new links from.
         MAX_HTML_SIZE = 500000
         MIN_TOKENS = 50
-        html_size = len(html_content) # Size of the HTML content in bytes.
 
         html_too_large = html_size > MAX_HTML_SIZE
         not_enough_tokens = num_info_tokens < MIN_TOKENS
@@ -210,9 +221,10 @@ class Scraper:
 
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return False
+        return True
 
 
-    def _is_similar(self, term_frequencies, num_terms, document_frequencies, fingerprints):
+    def _is_similar(self, term_frequencies, n_terms, document_frequencies, fingerprints):
         # SimHash algorithm, fixing binary hash width to 64 bits. Weight words using
         # term frequency -- inverse document frequency (tf-idf).
         WIDTH = 64
@@ -225,7 +237,7 @@ class Scraper:
             if frequency == 0: # Exclude uncounted tokens.
                 continue
 
-            tf = frequency / num_terms
+            tf = frequency / n_terms
             idf = np.log10(self.MAX_DOCUMENTS / (1 + document_frequencies[token]))
 
             # If the token appeared in 19 or 20 documents, set a minimum above 0
@@ -308,9 +320,9 @@ class Scraper:
 
 
     def _is_trap(self, parsed_url):
-        # If the same page with different query parameters has been visited more than 5 times, it is likely a trap.
+        # If the same page with different query parameters has been visited more than 10 times, it is likely a trap.
         site = parsed_url.netloc + parsed_url.path
-        return self.site_counts[site] > 5
+        return self.site_counts[site] > 10
 
 
     def _remove_query_params(self, url):
