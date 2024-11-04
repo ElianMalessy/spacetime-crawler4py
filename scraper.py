@@ -1,16 +1,16 @@
 import re
-from urllib.parse import urlparse, urljoin, parse_qs, urlencode, urlunparse
+import numpy as np
 from bs4 import BeautifulSoup
 from collections import defaultdict
-import numpy as np
+from urllib.parse import urlparse, urljoin, parse_qs, urlencode, urlunparse
 
 
 class Scraper:
     # Subdomains of uci.edu to crawl within the styx web cache.
     _allowed_domains = [ "ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu" ]
 
-    # These query parameters actually give a dynamic result and not a trap. 
-    # Just strip these parameters not in this set from URLs.
+    # Immutable set of query parameters which indicate dynamic pages.
+    # To avoid traps, strip any parameters not in this set from all URLs.
     _good_params = frozenset( [ "p", "page", "paged", "baldiPage", "page_id", "id", "seminar_id", "attachment_id" "archive_year", "year", "limit", "people", "start", "offset", "limit", "idx", "s", "search", "q", "query", "eventDisplay", "tribe-bar-date", "redirect_to"] )
 
     # Set of English words to ignore. Pulled from the resource linked in the
@@ -19,17 +19,22 @@ class Scraper:
 
 
     def __init__(self):
-        self.visited_urls = set() # Used for reporting how many unique pages were found and avoiding duplicates.
-        self.subdomain_counts = defaultdict(int) # Used for reporting how many subdomains were found + unique pages in them.
-        self.site_counts = defaultdict(int) # Used for checking if the crawler has been trapped.
-        self.token_counts = defaultdict(int) # Used for reporting the top 50 most common words.
-        self.max_page_len = 0 # Used for reporting the longest page by measure of word count.
-        self.max_page_url = "" # Used for reporting the URL of the longest page.
+        # Attributes used for reporting statistics.
+        self.visited_urls = set() # Number of unique pages found. Also used to avoid duplicate pages.
+        self.subdomain_counts = defaultdict(int) # Number of subdomains found, and number of unique pages in them.
+        self.token_counts = defaultdict(int) # The top 50 most common words.
+        self.max_page_url = "" # URL of the longest page.
+        self.max_page_len = 0 # Longest page by measure of word count.
 
-        # Used for tf-idf
+        # Attribute used for checking if the crawler has been trapped.
+        self.site_counts = defaultdict(int)
+
+        # Attributes used for checking document similarity via tf-idf.
         self.MAX_DOCUMENTS = 20
-        self.subdomain_similarity = {}  # (n_documents, document_frequency, fingerprints)
-        # subdomain_dfs contains the n_documents int and the document_frequency dict for each subdomain
+        # Dictionary that maps unique subdomain URLs to lists of [number of
+        # documents, token-frequency mapping, and document fingerprints], where
+        # each tuple contains data specific to the subdomain it is mapped with.
+        self.subdomain_similarity = {}
 
 
     def extract_next_links(self, url, resp):
@@ -43,203 +48,206 @@ class Scraper:
         #         resp.raw_response.url: the url, again
         # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-        # If status is 404, we don't count the page because it doesn't exist
+        # If the HTTP status is 404, the URL will not even be counted as it does not exist.
         if resp.status == 404:
             return []
 
-        # Webpage uniqueness is based on the URL, not the content.
-        # The total number of unique pages is the sum of either the site_counts or the subdomain_counts.
+        # The statistic counting the number of unique pages found is based on the URL, not the content.
         parsed_url = urlparse(url)
         self.visited_urls.add(url)
         self.subdomain_counts[parsed_url.hostname] += 1
+
+        # Increment times visited count used to check for traps.
         self.site_counts[parsed_url.netloc + parsed_url.path] += 1
 
-        # Redirected
-        if url != resp.url: 
-            # Already visited
+        # Case encountered when the crawler is redirected to a different URL.
+        if url != resp.url:
+            # If this page has already been visited, do not crawl.
             if resp.url in self.visited_urls:
                 return []
 
+            # If the URL redirected to is invalid, check its deparameterized
+            # version. If that is also invalid, do not crawl.
             if not is_valid(resp.url):
-                # If the current url is invalid because of its parameters, try to visit the non-parameterized url.
-                # Otherwise its irredeemable.
-
-                # we remove all query parameters that are not in the _good_params set, standardizing our url and avoiding traps
-                full_url = self._remove_query_params(resp.url)
-                if full_url not in self.visited_urls and is_valid(full_url):
-                    return [full_url]
+                # Strip all query parameters not in the _good_params set,
+                # standardizing our URL and avoiding traps.
+                redirect_url = self._remove_query_params(resp.url)
+                if redirect_url not in self.visited_urls and is_valid(redirect_url):
+                    return [redirect_url]
+                
                 return []
 
-            # If we are redirected, we count both domain names.
-            # replace the parsed_url
-            parsed_url = urlparse(resp.url)
+            # If the URL redirected to is valid, count it towards statistics too.
+            parsed_url = urlparse(resp.url) # Replace parsed_url.
             self.visited_urls.add(resp.url)
             self.subdomain_counts[parsed_url.hostname] += 1
+
+            # Increment times visited count used to check for traps.
             self.site_counts[parsed_url.netloc + parsed_url.path] += 1
 
-
-        # Ignore any HTTP responses that are not 200
+        # If the HTTP status is not 200 OK, do not crawl.
         if resp.status != 200:
             return []
 
-        # If we've visited this page too many times (different query parameters), its a trap
+        # If this page has been visited too many times with different query parameters,
+        # it is a trap, so do not crawl.
         if self.is_trap(parsed_url):
             return []
 
-        # Parse the content
+        # Parse this page's content.
         content_type = resp.raw_response.headers.get('Content-Type', '')
         charset = re.search(r'charset=([^;\s]+)', content_type)
         encoding = charset.group(1) if charset else 'utf-8'
         html_content = resp.raw_response.content.decode(encoding, errors='replace')
+
+        # If the HTML content is empty, do not crawl.
         if not html_content:
             return []
 
         soup = BeautifulSoup(html_content, 'lxml')
         if not soup or not soup.html: 
-            # File is not valid html
-            # Gets rid of dead 200 urls
+            # If the document is not valid HTML or is from a dead 200 page, do not crawl.
             return []
+        
+        anchors = soup.find_all('a', href=True) # Find anchor tags for the next links.
 
-        # Size of the html content in bytes
-        html_size = len(html_content)
-
-        # Get the anchor tags for the next links but remove them from the page to count n_informational_tokens
-        anchors = soup.find_all('a', href=True)
+        # If a document does not have <a> or <div> tags it is likely not valid HTML.
+        if not anchors and not soup.find('div'):
+            return []
+        
+        # Remove anchors from the page to count the number of informational tokens.
         for element in soup(['a']):
             element.extract()
 
-
-        # Get all tokens in the html, tokens are alphanumeric sequences of length 2 or more with no underscores
+        # Get all tokens from the HTML content (alphanumeric sequences of length 2 or more with no underscores).
         informational_tokens = re.findall(r'[^\W_]{2,}', soup.get_text().lower())
 
-        # Get the term frequency of each token in the document for tf-idf
-        term_frequency = defaultdict(int)
+        # Count the number of total tokens and informational tokens if they are not stopwords.
+        num_tokens = len(informational_tokens)
+        num_info_tokens = 0
 
-        # Start the count for the number of total tokens and informational tokens
-        n_tokens = len(informational_tokens)
-        n_informational_tokens = 0
-
+        term_frequencies = defaultdict(int) # Frequency of each token in the document.
         for token in informational_tokens:
             if token not in self._stopwords:
-                n_informational_tokens += 1
-                term_frequency[token] += 1
+                num_info_tokens += 1
+                term_frequencies[token] += 1
 
-        # Anchor text is not high information most of the time but we count it in term_frequency because layouts share anchors
+        # Anchor text is mostly low information value, but count it in term_frequencies
+        # anyways since different page layouts often share anchors.
         for anchor in anchors:
             anchor_tokens = re.findall(r'[^\W_]{2,}', anchor.get_text().lower())
-            n_tokens += len(anchor_tokens)
+            num_tokens += len(anchor_tokens)
             for token in anchor_tokens:
                 if token not in self._stopwords:
-                    term_frequency[token] += 1
-
+                    term_frequencies[token] += 1
 
         # URLs will still be counted as visited regardless, but:
-        #   - If a webpage's raw HTML is greater than 500 KB, regardless of token count,
-        #     it is too large to be worth extracting new links from.
+        #   - If a page's raw HTML is greater than 500 KB, regardless of token
+        #     count, it is too large to be worth extracting new links from.
         #
         #   OR
         # 
-        #   - If a webpage has less than 50 informational tokens, regardless of HTML size, it
-        #     has low information value and is not worth extracting new links from.
+        #   - If a page has less than 50 informational tokens, regardless of HTML size,
+        #     it has low information value and is not worth extracting new links from.
         #
         #   OR
         #
-        #   - If a webpage's raw HTML is greater than 300 KB AND its content contains
-        #     less than 100 informational tokens, it is fairly large while also likely having low
-        #     information value, so it is not worth extracting new links from.
-
-
+        #   - If a page's raw HTML is greater than 300 KB AND its content contains
+        #     less than 100 informational tokens, it is fairly large while also likely
+        #     having low information value, so it is not worth extracting new links from.
         MAX_HTML_SIZE = 500000
         MIN_TOKENS = 50
+        html_size = len(html_content) # Size of the HTML content in bytes.
+
         html_too_large = html_size > MAX_HTML_SIZE
-        not_enough_tokens = n_informational_tokens < MIN_TOKENS
-        not_enough_tokens_for_large_html = html_size > MAX_HTML_SIZE - 200000 and (n_informational_tokens < MIN_TOKENS * 2)
+        not_enough_tokens = num_info_tokens < MIN_TOKENS
+        not_enough_tokens_for_large_html = (html_size > MAX_HTML_SIZE - 200000) and (num_info_tokens < MIN_TOKENS * 2)
 
         if html_too_large or not_enough_tokens or not_enough_tokens_for_large_html:
             return []
 
         if parsed_url.hostname not in self.subdomain_similarity:
+            # Initialize subdomain similarity record with 0 documents,
+            # an empty token mapping, and no fingerprints.
             self.subdomain_similarity[parsed_url.hostname] = [0, defaultdict(int), []]
+        
         similarity = self.subdomain_similarity[parsed_url.hostname]
-        # [0] is n_documents [1] is document_frequency [2] is fingerprints
 
-        # To compare similarity, 20 documents from this subdomain must be seen
-        # This avoid the issue of initial innacurate fingerprints
+        # To avoid initially inaccurate fingerprints, 20 documents
+        # from this subdomain must have been found. Stop updating
+        # subdomain token frequencies after 20 documents because by
+        # then common general words and page layouts should be captured,
+        # while fingerprinting will remain stable.
         if similarity[0] < self.MAX_DOCUMENTS:
-            # Update document frequency for this subdomain
-            similarity[0] += 1
-
-            # Update the document frequency for each token
-            for token in term_frequency.keys():
+            similarity[0] += 1 # Increment number of documents.
+            for token in term_frequencies.keys(): # Update subdomain token frequency.
                 similarity[1][token] += 1
-
-
-        # Detect and avoid similarity after having calculated the document frequency for 20 documents in this subdomain
-        # We freeze the document frequency after 20 document because this should capture the layouts and common general words while keeping the fingerprinting stable
-        elif self.is_similar(term_frequency, n_tokens, similarity[1], similarity[2]):
+        elif self.is_similar(term_frequencies, num_tokens, similarity[1], similarity[2]):
+            # Detect and avoid exact or near duplicate pages after this page's
+            # subdomain has token frequencies calculated for 20 documents.
             return []
 
-        # Update the statistics for the length of the longest page and the token counts.
-        if n_tokens > self.max_page_len:
-            self.max_page_len = n_tokens
+        # Update longest page length and top 50 token counts statistics.
+        if num_tokens > self.max_page_len:
             self.max_page_url = resp.url
+            self.max_page_len = num_tokens
 
-        for token, count in term_frequency.items():
+        for token, count in term_frequencies.items():
             self.token_counts[token] += count
 
-
-        # Extract all links in the webpage.
+        # Extract all linked URLs from the webpage.
         links = set()
         for link in anchors:
             href = link.get('href')
             if href is not None:
                 # Join relative links to the base URL.
                 joined_url = urljoin(resp.url, href, allow_fragments=False)
-                # Only keep known good query parameters
-                full_url = self._remove_query_params(joined_url)
+                # Strip all query parameters not in the set of known good parameters.
+                linked_url = self._remove_query_params(joined_url)
 
-                # Only extract a link if the exact same URL has not been visited and the URL is valid.
-                if full_url not in self.visited_urls and is_valid(full_url):
-                    links.add(full_url)
+                if linked_url not in self.visited_urls and is_valid(linked_url):
+                    links.add(linked_url)
 
         return list(links)
 
 
-    def is_similar(self, term_frequency, n_terms, document_frequency, fingerprints):
-        # SimHash algorithm, fixing binary hash width to 1st through 64 bits
-        # which avoids a preceding negative. Oftentimes the width of the binary-formatted string of the hash will be slightly less than 64 so we need to sign extend the string.
+    def is_similar(self, term_frequencies, num_terms, document_frequencies, fingerprints):
+        # SimHash algorithm, fixing binary hash width to 64 bits. Weight words using
+        # term frequency -- inverse document frequency (tf-idf).
         WIDTH = 64
         THRESHOLD = 0.80
 
         # Build 64-dimensional vector V to hold weighted components.
         vec_v = np.zeros(WIDTH, dtype=np.float64)
 
-        for token, frequency in term_frequency.items():
-            if frequency == 0:
+        for token, frequency in term_frequencies.items():
+            if frequency == 0: # Exclude uncounted tokens.
                 continue
 
-            tf = frequency / n_terms
-            idf = np.log10(self.MAX_DOCUMENTS / (1 + document_frequency[token]))
+            tf = frequency / num_terms
+            idf = np.log10(self.MAX_DOCUMENTS / (1 + document_frequencies[token]))
 
-            # if it appeared in all 20 documents or just 19
+            # If the token appeared in 19 or 20 documents, set a minimum above 0
+            # so the weight is still captured, just minimally.
             if idf <= 0:
                 idf = 0.001
 
-            # weight
+            # Token weight.
             tf_idf = tf * idf
 
-            # Convert the hash of the current token to a binary string
+            # Convert the hash of the current token to a binary string.
             hashed_token = hash(token)
             hashed_str = '{:b}'.format(hashed_token)
 
-            # Sign extend manually
+            # Oftentimes the width of the binary-formatted string of the token's hash
+            # will be slightly less than 64 bits, so manually sign extend it.
+            extend_bit = '0'
             if hashed_token < 0:
                 hashed_str = hashed_str[1:]
-                for _ in range(64 - len(hashed_str)):
-                    hashed_str = '1' + hashed_str
-            else:
-                for _ in range(64 - len(hashed_str)):
-                    hashed_str = '0' + hashed_str
+                extend_bit = '1'
+            
+            for _ in range(64 - len(hashed_str)):
+                hashed_str = extend_bit + hashed_str
 
             bits = np.array([1.0 if bit == '1' else -1.0 for bit in hashed_str], dtype=np.float64)
             vec_v += bits * tf_idf
@@ -270,8 +278,8 @@ class Scraper:
         if not domain:
             return False
 
-        for d in self._allowed_domains:
-            if domain == d or domain.endswith("." + d):
+        for ad in self._allowed_domains:
+            if domain == ad or domain.endswith("." + ad):
                 return True
 
         # Special case for "today.uci.edu/department/information_computer_sciences/*".
@@ -284,17 +292,18 @@ class Scraper:
     def is_trap(self, parsed_url):
         # If the same page with different query parameters has been visited more than 5 times, it is likely a trap.
         site = parsed_url.netloc + parsed_url.path
-
         return self.site_counts[site] > 5
 
+
     def get_top_words(self):
-        # Sort all tokens by highest count and take the first 50
+        # Sort all tokens by descending count and take the first 50.
         sorted_tokens = sorted(self.token_counts.items(), key=lambda item: item[1], reverse=True)
         return sorted_tokens[:50]
 
+
     def _remove_query_params(self, url):
         # Remove any query parameters that are known to cause traps.
-        # Also removes any fragments.
+        # Also remove any fragments.
         parsed_url = urlparse(url)
         queries = parse_qs(parsed_url.query)
 
@@ -302,13 +311,12 @@ class Scraper:
         for param in queries.keys():
             if param.split('[')[0] not in self._good_params:
                 params_to_remove.append(param)
-        for param in params_to_remove: # Can modify dictionary now
+        for param in params_to_remove: # Modify dictionary after identifying bad parameters.
             del queries[param]
 
         query_string = urlencode(queries, doseq=True)
 
-        full_url = urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.params, query_string, ''))
-        return full_url
+        return urlunparse((parsed_url.scheme, parsed_url.netloc, parsed_url.path, parsed_url.params, query_string, ''))
 
 # End class Scraper
 
@@ -338,7 +346,11 @@ def is_valid(url):
                 + r"|epub|dll|cnf|tgz|sha1"
                 + r"|thmx|mso|arff|rtf|jar|csv"
                 + r"|rm|smil|wmv|swf|wma|zip|rar|gz"
-                + r"|ppsx|txt|bib)$", parsed_url.path.lower()):
+                + r"|ppsx|pps|txt|bib|sql|xml|pov|tsv|mat|in|out|scm|db"
+                + r"|1_manual|2_manual|mpg|img|svg|webp|heic|lif|hqx|fig"
+                + r"|lsp|java|war|c|h|cpp|hpp|cp|sh|ss|pl|rss|ff"
+                + r"|rle|Z|shar|ova|edelsbrunner|class|prn"
+                + r"|conf|cls|can|odp|results|sas|odc|ma|pd|mol|grm|nb)$", parsed_url.path.lower()):
             return False
 
         if not s.is_valid_domain(parsed_url) or s.is_trap(parsed_url):
@@ -348,6 +360,4 @@ def is_valid(url):
     except TypeError:
         print ("TypeError for url")
         return False
-
-
 

@@ -112,24 +112,22 @@ class Frontier(object):
 
     # Get number of unique URLs found after discarding the fragment part
     def log_num_unique_urls(self):
-        unique_url_count = len(s.visited_urls)
-        self.logger.info(f"Number of unique pages: {unique_url_count}")
+        self.logger.info(f"Number of unique pages: {len(s.visited_urls)}")
 
     # Get the longest page (page with the highest word count)
     def log_longest_page(self):
-        self.logger.info(f"The longest page, {s.max_page_url} has {s.max_page_len} words")
+        self.logger.info(f"Length of the longest page ({s.max_page_url}): {s.max_page_len} words")
 
     # Get the 50 most common words from all crawled domains
     def log_top_words(self):
-        top_words = s.get_top_words()
-        self.logger.info(f"The 50 most common words across all crawled domains:")
-        for index, (word, count) in enumerate(top_words, start=1):
+        self.logger.info("The 50 most common words across all crawled domains:")
+        for index, (word, count) in enumerate(s.get_top_words(), start=1):
             self.logger.info(f"{index}. {word}: {count}")
 
     # Alphabetical list of subdomains in the uci.edu domain, with number of unique pages
     def log_subdomain_counts(self):
         self.logger.info(f"Number of subdomains: {len(s.subdomain_counts)}")
-        subdomain_counts = s.subdomain_counts
-        sorted_subdomains = sorted(subdomain_counts.items())
+        sorted_subdomains = sorted(s.subdomain_counts.items())
+        self.logger.info("List of subdomains and the number of unique pages found in them:")
         for subdomain, count in sorted_subdomains:
             self.logger.info(f"{subdomain}, {count}")
