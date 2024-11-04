@@ -160,6 +160,10 @@ class Scraper:
 
                 if redirect_url in self.visited_urls or not is_valid(redirect_url):
                     return None
+                
+                # If the deparameterized version of the URL redirected to is valid,
+                # use it to replace parsed_url.
+                resp.url = redirect_url
 
             # If the URL redirected to is valid, count it towards statistics too.
             parsed_url = urlparse(resp.url) # Replace parsed_url.
